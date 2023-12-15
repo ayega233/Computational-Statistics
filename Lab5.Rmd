@@ -1,0 +1,303 @@
+---
+title: "Lab 5"
+author: "Ayesha Gamage-(ayega981)/Muditha Cherangani(mudch175)"
+date: "2023-12-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 1: Hypothesis testing
+
+### 1.Scatterplot of Y versus X
+```{r, echo=FALSE}
+library("boot")
+########Read data from csv file
+setwd("D:/MSC/SEMESTER1/732A90  Computational statistics/Labs/submites")
+data<-read.delim("lottery.csv",sep=";")
+
+##### Plot data
+plot(data$Day_of_year, data$Draft_No, main="Scatterplot (Y=Draft No) versus  (X=Day of year)",
+     xlab="Day of Year", ylab="Draft No", pch=19)
+```
+
+The data points are spread out in this graph. This means there is no data trend; thus, there is no pattern visible in the scatterplot.
+
+### 2. Fit a curve to the data
+```{r, echo=FALSE}
+#linear regression model
+data1 <- data[-4]
+lm_model<-lm(Draft_No~.,data1)
+# summary(lm_model)
+
+##### Plot data
+plot(data$Day_of_year, data$Draft_No, main="Scatterplot (Y=Draft No) versus  (X=Day of year)",
+     xlab="Day of Year", ylab="Draft No", pch=19)
+
+pred.int.lin<-predict(lm_model,data,interval="conf",level=0.95)
+lines(data$Day_of_year,pred.int.lin[,1],col="yellow",lwd=2)
+
+lm.p3<-lm(formula=Draft_No~poly(Day_of_year,3),data)
+pred.int.p3<-predict(lm.p3,data,interval="conf",level=0.95)
+lines(data$Day_of_year,pred.int.p3[,1],col="green",lwd=4)
+
+lm.phigh<-lm(formula=Draft_No~poly(Day_of_year,20),data)
+pred.int.phigh<-predict(lm.phigh,data,interval="conf",level=0.95)
+lines(data$Day_of_year,pred.int.phigh[,1],col="red",lwd=2)
+
+
+loess_model <- loess(Draft_No~Day_of_year,data)
+predicted_values <- predict(loess_model, newdata = data)
+
+lines(data$Day_of_year, predicted_values, col = "blue",lwd=2)
+legend("topright", legend = c("lm-default","lm-p3", "lm-p20","loess"), col = c("yellow","green","red", "blue"),lty = 1)
+```
+The yellow, red, and green line represents the prediction of the linear regression model.The blue line represents the prediction of the loess model. From the point of view of the lines, there is a clear relationship between parameters.There are correlation between X and Y. However, these curves are not enough to identify which parameters are significantly responsible for non–randomness. When consider the order ,order is significant for the curve because the highest order given the approximately equel curve to loess model's curve.
+
+### 3.Check if the lottery is random
+The statistic consider,
+$$
+S=\sum_{i = 1}^{n}|\hat{Y}_{i}-\overline{Y}|
+$$
+```{r, echo=FALSE}
+observed_s <- sum(abs(predict(loess_model) - mean(data$Draft_No)))
+cat("S = ",observed_s)
+```
+Estimate S’s distribution through a non–parametric bootstrap, B = 2000 
+```{r, echo=FALSE,warning=FALSE}
+set.seed(1234)
+stat1<-function(data,indices){
+  train_data<-as.data.frame(data[indices,])
+  res<-lm(Draft_No~Day_of_year,train_data)
+  res$coefficients[2]
+}
+
+res<-boot(data,stat1,R=2000)
+ci <- boot.ci(res)
+print(ci)
+```
+```{r, echo=FALSE}
+# Extract p-values from the confidence interval
+cat("P-values :",pt(ci$t0,length(data$Day_of_year)-1))
+plot(res)
+```
+
+The p–value of the observed value of S,
+```{r, echo=FALSE}
+set.seed(1234)
+# Function to calculate the statistic S
+statistic_S <- function(data, indices, loess_model) {
+  observed_values <- data$Draft_No
+  predicted_values <- predict(loess_model)
+  
+  # Calculate the statistic S for the current bootstrap sample
+  S <- sum(abs(predicted_values[indices] - mean(observed_values)))
+  
+  return(S)
+}
+
+# Using boot function  
+  loess_model <- loess(Draft_No~Day_of_year,data)
+  res <- boot(data, statistic_S, R = 2000, loess_model = loess_model)
+
+# Calculate the observed S statistic
+observed_S <- statistic_S(data, 1:nrow(data), loess_model)
+
+# Calculate the p-value
+p_value <- mean(res$t >= observed_S)
+
+# Display the p-value
+cat("p-value:", p_value, "\n")
+
+```
+According to BOOTSTRAP CONFIDENCE INTERVAL CALCULATIONS, confidence intervals levels 95%. Computed p value is $0.4955 > 0.05 $ , reject $H_{0}$ ,then lottery wasn't random.
+
+
+### 4.Based on the test statistic S, implemented a function that tests the hypothesis,
+$$
+    H_{0}: Lottery  \ is \ random versus  \\
+    H_{1}: Lottery \ is \ non–random.
+$$
+The function return the value of S and its p–value, based on 2000 bootstrap samples.
+```{r, echo=TRUE}
+  set.seed(1234)
+# Function to test the hypothesis
+test_hypothesis <- function(data, loess_model, B = 2000) {
+  # Using boot function
+  res <- boot(data, statistic_S, R = B, loess_model = loess_model)
+  
+  # Calculate the observed S statistic
+  observed_S <- statistic_S(data, 1:nrow(data), loess_model)
+  
+  # Calculate the p-value
+  p_value <- mean(res$t >= observed_S)
+  
+  # Return results
+  result <- list(observed_S = observed_S, p_value = p_value)
+  return(result)
+}
+  # Example call
+  result <- test_hypothesis(data, loess_model)
+
+  # Display results
+  cat("Observed S:", result$observed_S, "\n")
+  cat("p-value:", result$p_value, "\n")
+
+```
+
+### 5.Create a dataset of the same dimensions as the original data.Here I used consecutive dates and blocks of consecutive dates for create data.
+
+
+```{r, echo=FALSE}
+# Function to create a dataset with assigned end numbers for consecutive dates
+create_dataset_consecutive <- function(n, k) {
+  # Generate dates from 1 to n
+  dates <- 1:n
+  
+  # Create a dataset with Date and LotteryNumber columns
+  dataset <- data.frame(Day_of_year = dates, Draft_No = NA)
+  
+  # Choose k consecutive dates and assign them end numbers
+  start_index <- sample(1:(n - k + 1), 1)
+  end_dates <- start_index:(start_index + k - 1)
+  dataset$Draft_No[end_dates] <- n + 1  # Assign end numbers
+  
+  # Assign random numbers to the remaining dates
+  remaining_dates <- dataset$Draft_No[is.na(dataset$Draft_No)]
+  remaining_dates <- sample(1:(n - k), length(remaining_dates), replace = FALSE)
+  dataset$Draft_No[is.na(dataset$Draft_No)] <- remaining_dates
+  
+  # Return the dataset
+  return(dataset)
+}
+```
+
+
+```{r, echo=FALSE}
+create_dataset_blocks <- function(n, k) {
+  # Generate dates from 1 to n
+  dates <- 1:n
+  
+  # Create a dataset with Date and LotteryNumber columns
+  dataset <- data.frame(Day_of_year = dates, Draft_No = NA)
+  
+  # Ensure k is at least 3
+  if (k < 3) {
+    stop("k should be at least 3 for blocks of consecutive dates.")
+  }
+  # Calculate the number of blocks (bk/3c)
+  num_blocks <- floor(k/3)
+  block_start <- sample(seq(1, n - 2, by = 3), num_blocks, replace = FALSE)
+   for (j in block_start) {
+    #cat("block_start",j,"block_end",j+2,"\n")
+    dataset$Draft_No[j:(j+2)] <- n + 1  # Assign end numbers
+  }
+  remaining_dates <- dataset$Draft_No[is.na(dataset$Draft_No)]
+  #cat("1",remaining_dates,"\n")
+  # If k is not divisible by 3, some blocks can be of length bk/3c + 1
+  if (k %% 3 != 0) {
+    remaining_block <- sample(which(is.na(dataset$Draft_No)), k-(num_blocks*3))
+    #cat("rest",k-(num_blocks*3),remaining_block,"\n")
+    dataset$Draft_No[remaining_block] <- n + 1  # Assign end number
+  }
+ 
+  remaining_dates <- dataset$Draft_No[is.na(dataset$Draft_No)]
+  #cat("2",length(remaining_dates),"\n")
+  if(length(remaining_dates)>0){
+    remaining_dates <- sample(1:(n - k), length(remaining_dates), replace = FALSE)
+    dataset$Draft_No[is.na(dataset$Draft_No)] <- remaining_dates
+  }
+ 
+  
+  # Return the dataset
+  return(dataset)
+}
+
+
+```
+
+
+```{r, echo=FALSE}
+n <- 366
+k <- 50  # You can adjust this value
+
+# Create the dataset with consecutive dates
+generated_dataset_consecutive <- create_dataset_consecutive(n, k)
+
+# Fit the loess model to the consecutive dataset
+loess_consecutive <- loess(Draft_No ~ Day_of_year, data = generated_dataset_consecutive)
+# Create the dataset with blocks of consecutive dates
+generated_dataset_blocks <- create_dataset_blocks(n, k)
+t<-which(is.na(generated_dataset_blocks$Draft_No))
+generated_dataset_blocks$Draft_No[is.na(generated_dataset_blocks$Draft_No)]
+# Fit the loess model to the block dataset
+loess_blocks <- loess(Draft_No ~ Day_of_year, data = generated_dataset_blocks)
+
+# Test hypothesis for consecutive dataset
+result_consecutive <- test_hypothesis(generated_dataset_consecutive, loess_consecutive)
+
+# Test hypothesis for block dataset
+result_blocks <- test_hypothesis(generated_dataset_blocks, loess_blocks)
+
+# Display results
+cat("Results for Consecutive Dataset:\n")
+cat("Observed S:", result_consecutive$observed_S, "\n")
+cat("p-value:", result_consecutive$p_value, "\n")
+cat("Accept H0:", result_consecutive$p_value < 0.05, "\n\n")
+
+cat("Results for Block Dataset:\n")
+cat("Observed S:", result_blocks$observed_S, "\n")
+cat("p-value:", result_blocks$p_value, "\n")
+cat("Accept H0:", result_blocks$p_value < 0.05, "\n")
+
+```
+```{r, echo=FALSE}
+k = 10
+Consecutive_result <- list()
+Block_result <- list()
+for(k in 3:(n-1)){
+  # Create the dataset with consecutive dates
+  generated_dataset_consecutive <- create_dataset_consecutive(n, k)
+  
+  # Fit the loess model to the consecutive dataset
+  loess_consecutive <- loess(Draft_No ~ Day_of_year, data = generated_dataset_consecutive)
+  
+  
+  # Create the dataset with blocks of consecutive dates
+  generated_dataset_blocks <- create_dataset_blocks(n, k)
+  # Fit the loess model to the block dataset
+  loess_blocks <- loess(Draft_No ~ Day_of_year, data = generated_dataset_blocks)
+
+  # Test hypothesis for consecutive dataset
+  result_consecutive <- test_hypothesis(generated_dataset_consecutive, loess_consecutive)
+  
+  # Test hypothesis for block dataset
+  result_blocks <- test_hypothesis(generated_dataset_blocks, loess_blocks)
+  # cat("K value:", k, "\n")
+  if(0.025 < abs(result_consecutive$p_value) || abs(result_consecutive$p_value)  > 0.025){
+
+    Consecutive_result[[length(Consecutive_result)+1]] <- list(Observed_S <-result_consecutive$observed_S,p_value <- result_consecutive$p_value)
+    Block_result[[length(Block_result)+1]] <- list(Observed_S <-result_blocks$observed_S,p_value <-result_blocks$p_value)
+    
+    #here i print only 3 sample for the report.
+    if(k==0 || k==5 || k==10){
+    cat("Results for Consecutive Dataset:\n")
+    cat("Observed S:", result_consecutive$observed_S, "\n")
+    cat("p-value:", result_consecutive$p_value, "\n")
+    cat("Reject H0:", result_consecutive$p_value < 0.025, "\n\n")
+
+    cat("Results for Block Dataset:\n")
+    cat("Observed S:", result_blocks$observed_S, "\n")
+    cat("p-value:", result_blocks$p_value, "\n")
+    cat("Reject H0:", result_blocks$p_value < 0.025, "\n")
+    
+    }
+  }
+}
+ggplot(economics, aes(date, unemploy)) + geom_line()
+```
+In this case, computed p-values are approximately equal, and all p-values are greater than 0.05. Then $H_{0}$ rejected.
+
+
